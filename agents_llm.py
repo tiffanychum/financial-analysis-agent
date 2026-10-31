@@ -1,15 +1,15 @@
-"""LLM orchestration: parallel analysts -> conditional debate -> trader ->
-risk debate -> judge. Runs on the Cursor SDK (cursor_sdk.Agent.prompt) using
-CURSOR_API_KEY, targeting the "grok 4.7 medium fast" model/variant resolved
+"""LLM orchestration: parallel analysts -> trader (bull case, bear case,
+weighing, plan) -> 3 risk seats -> 2 risk judges + ablation judge. Default
+provider is the Cursor SDK (cursor_sdk.Agent.prompt) using CURSOR_API_KEY,
+targeting the "grok 4.7 medium fast" model/variant resolved
 live against the account's model catalog (never hardcoded — Cursor's catalog
 and variant naming evolve; see cursor_sdk skill docs).
 
 Design contract (agreed):
 - every agent returns {signal, confidence 0-100, reasoning}
-- debate is conditional: conflicting signals -> 2-round Bull/Bear; consensus ->
-  one devil's-advocate stress test (anti-groupthink, cheaper on average)
-- every debate claim must cite a number from the data pack; judge discounts
-  uncited claims
+- no separate debate: the trader argues the case against the analyst majority
+  first, then the other side (unanimous panels get a skeptic instruction)
+- every trader/risk claim must cite a number from the data pack or a vote
 - LLM never does arithmetic; all numbers come precomputed in the pack
 - hard per-call timeout + total budget; any failure raises PipelineError with a
   short message (caller sends it to WhatsApp and exits — no retries)
@@ -182,7 +182,7 @@ def _ask_openai(client: LLMClient, prompt: str) -> str:
 
 
 def ask(client: LLMClient, system: str, user: str) -> str:
-    """One-shot Cursor agent call per persona/debate turn. Allow exactly one
+    """One-shot Cursor agent call per persona/trader/risk turn. Allow exactly one
     retry on empty content (mirrors the old Poe-quirk retry: a model can
     finish with no visible text on an off run)."""
     prompt = f"{TEXT_ONLY_PREAMBLE}\n\n{system}\n\n{user}"
@@ -268,7 +268,7 @@ def fetch_market_consensus(client: LLMClient, ticker: str, name: str | None,
     data when Yahoo's quoteSummary crumb is blocked (see data.py's fast_info/
     SEC/self-computed-beta fallbacks for the same gap on other fields). Runs
     a dedicated one-shot agent WITH webSearch enabled — unlike ask(), which
-    pins tools=[] for the pure-text analyst/debate calls — so it looks up
+    pins tools=[] for the pure-text analyst/trader/risk calls — so it looks up
     current numbers instead of recalling stale training data.
 
     LLM-summarized, so provenance is weaker than a direct API: the reply is
@@ -530,51 +530,6 @@ def _capped(text: str) -> str:
     return text[:TURN_CHAR_CAP].rstrip() + " … [truncated: over the turn limit]"
 
 
-def run_debate(client: LLMClient, pack_json: str, analysts: dict, budget: Budget) -> dict:
-    budget.check("debate")
-    signals = {v["signal"] for v in analysts.values()}
-    votes = json.dumps({k: v for k, v in analysts.items()}, indent=1)
-    cite_rule = ("Every claim MUST cite a specific number from the data pack or "
-                 "the analyst votes; uncited claims will be discounted. " + TURN_RULE)
-    transcript: list[str] = []
-
-    if len(signals) == 1:
-        mode = "devils-advocate"
-        only = signals.pop()
-        opp = "bearish" if only == "bullish" else "bullish"
-        da = _capped(ask(client,
-                 f"You are a devil's advocate. All analysts are {only}. Build the "
-                 f"strongest {opp} case to stress-test the consensus. " + cite_rule,
-                 f"Data pack:\n{pack_json}\n\nAnalyst votes:\n{votes}"))
-        transcript.append(f"DEVIL'S ADVOCATE ({opp}):\n{da}")
-    else:
-        mode = "bull-bear"
-        bull = _capped(ask(client, "You are the Bull researcher. Argue the bullish case. " + cite_rule,
-                   f"Data pack:\n{pack_json}\n\nAnalyst votes:\n{votes}"))
-        transcript.append("BULL R1:\n" + bull)
-        bear = _capped(ask(client, "You are the Bear researcher. Rebut the bull's strongest "
-                   "cited points, then argue the bearish case. " + cite_rule,
-                   f"Data pack:\n{pack_json}\n\nBull argued:\n{bull}"))
-        transcript.append("BEAR R1:\n" + bear)
-        bull2 = _capped(ask(client, "You are the Bull researcher. Directly rebut the bear's "
-                    "strongest cited points. " + cite_rule,
-                    f"Data pack:\n{pack_json}\n\nBear argued:\n{bear}"))
-        transcript.append("BULL R2:\n" + bull2)
-        bear2 = _capped(ask(client, "You are the Bear researcher. Closing rebuttal. " + cite_rule,
-                    f"Data pack:\n{pack_json}\n\nBull rebutted:\n{bull2}"))
-        transcript.append("BEAR R2:\n" + bear2)
-
-    budget.check("debate-judge")
-    judge = ask(client,
-                "You are the research judge. Weigh the debate; discount any claim "
-                "that does not cite a data-pack number. State which side carried "
-                "the argument and why. " + SCHEMA,
-                f"Data pack:\n{pack_json}\n\nAnalyst votes:\n{votes}\n\nDebate:\n"
-                + "\n\n".join(transcript))
-    return {"mode": mode, "transcript": transcript, "judge_text": judge,
-            "judge": parse_signal(judge)}
-
-
 # This is a long-only retail product: it never proposes shorting. "sell"
 # means "do not hold this / exit if you already do", displayed as AVOID -
 # not a short thesis with its own sizing. size_pct only ever answers "how
@@ -648,26 +603,44 @@ def _merge_judges(parsed: list[dict], horizon_months: int) -> dict:
     return base
 
 
-def run_decision(client: LLMClient, pack_json: str, analysts: dict, debate: dict,
+def trader_system(analysts: dict, horizon_months: int) -> str:
+    """The trader argues both sides itself (the separate bull/bear debate
+    rarely moved the call and was the slowest, most timeout-prone stage).
+    The case AGAINST the analyst majority comes first so the trader cannot
+    lead with the side it already agrees with; a tie counts as bearish.
+    A unanimous panel gets an explicit skeptic instruction instead of the
+    old devil's-advocate call."""
+    signals = [a.get("signal") for a in analysts.values()]
+    bullish_majority = signals.count("bullish") > signals.count("bearish")
+    cases = [("Bear", "NOT to buy"), ("Bull", "to buy")]
+    (first, first_why), (second, second_why) = cases if bullish_majority else cases[::-1]
+    unanimous = (f"The analysts are unanimously {signals[0]}; make the opposite case "
+                 "the strongest one a skeptic would make.\n"
+                 if signals and len(set(signals)) == 1 else "")
+    return (
+        "You are the trader. Work in four labeled sections; every claim cites a "
+        "data-pack number or an analyst vote (uncited claims are discounted):\n"
+        f"## {first} case - the 3 strongest reasons {first_why}.\n"
+        f"## {second} case - the 3 strongest reasons {second_why}.\n"
+        f"## Weighing - which case is stronger over the {horizon_months}-month holding "
+        "period and why; name the single fact that would change your mind.\n"
+        "## Plan - direction, size (0-10% of a diversified portfolio slice, 0 unless "
+        f"buy), horizon ({horizon_months} months, fixed by the user), invalidation level.\n"
+        + unanimous +
+        "If earnings_calendar.flag_earnings_within_2w is true, note the imminent print "
+        "as a volatility event (it does not by itself block a buy). If pack.portfolio "
+        "is present, size against the user's ACTUAL current_ticker_existing_pct and "
+        "concentration_hhi, not an empty portfolio. Keep each section under 150 words. "
+        + LONG_ONLY_NOTE + " " + NO_MATH)
+
+
+def run_decision(client: LLMClient, pack_json: str, analysts: dict,
                  budget: Budget, horizon_months: int = DEFAULT_HORIZON_MONTHS,
                  pack_json_redacted: str | None = None) -> dict:
     budget.check("trader")
-    context = (f"Analyst votes:\n{json.dumps(analysts, indent=1)}\n\n"
-               f"Research judge verdict:\n{debate['judge_text']}")
-    trader = ask(client,
-                 "You are the trader. Synthesize a concrete proposal: direction, "
-                 "position size as % of a diversified portfolio slice (0-10%, "
-                 "0 unless the direction is buy), "
-                 f"time horizon ({horizon_months} months, fixed by the user), "
-                 "invalidation level. If the pack's earnings_calendar shows "
-                 "flag_earnings_within_2w true, note the imminent print as a "
-                 "near-term volatility event (does not by itself block a buy). "
-                 "If pack.portfolio is present, size relative to the user's "
-                 "ACTUAL current_ticker_existing_pct and concentration_hhi, "
-                 "not a hypothetical empty portfolio - a small add on top of "
-                 "an already-large position is a different call than the "
-                 "same % in a fresh position. " + LONG_ONLY_NOTE + " " + NO_MATH,
-                 f"Data pack:\n{pack_json}\n\n{context}")
+    votes = f"Analyst votes:\n{json.dumps(analysts, indent=1)}"
+    trader = ask(client, trader_system(analysts, horizon_months),
+                 f"Data pack:\n{pack_json}\n\n{votes}")
 
     stances = {
         "aggressive": "You are the AGGRESSIVE risk manager: argue for more exposure if the edge is real.",
@@ -675,14 +648,14 @@ def run_decision(client: LLMClient, pack_json: str, analysts: dict, debate: dict
         "neutral": "You are the NEUTRAL risk manager: balance both prior arguments.",
     }
     risk_transcript = []
-    prior = trader
     for stance, sys in stances.items():
         budget.check(f"risk-{stance}")
+        # Every turn is already capped at TURN_CHAR_CAP, so the full discussion
+        # stays bounded; trimming it dropped earlier seats' arguments.
         t = _capped(ask(client, sys + " Cite data-pack numbers. " + TURN_RULE,
-                f"Data pack:\n{pack_json}\n\nTrader proposal:\n{trader}\n\n"
-                f"Discussion so far:\n{prior[-3000:]}"))
+                f"Data pack:\n{pack_json}\n\n{votes}\n\nTrader proposal:\n{trader}\n\n"
+                "Discussion so far:\n" + ("\n\n".join(risk_transcript) or "(none yet)")))
         risk_transcript.append(f"{stance.upper()}:\n{t}")
-        prior = prior + "\n" + t
 
     budget.check("risk-judge")
     judge_system = (
@@ -690,7 +663,7 @@ def run_decision(client: LLMClient, pack_json: str, analysts: dict, debate: dict
         f'holding period is {horizon_months} months, chosen by the user; '
         'judge the call over exactly that window and do not propose a '
         'different one. End with a JSON block exactly: ' + JUDGE_JSON)
-    judge_user = (f"Data pack:\n{pack_json}\n\nTrader proposal:\n{trader}\n\n"
+    judge_user = (f"Data pack:\n{pack_json}\n\n{votes}\n\nTrader proposal:\n{trader}\n\n"
                   f"Risk debate:\n" + "\n\n".join(risk_transcript))
     # Ablation: same call without the dollar fair value, the trader/risk text
     # that quotes it, or the valuation seat's vote. A different answer means

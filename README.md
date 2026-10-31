@@ -14,8 +14,7 @@ The key rule is that **formulas do the math and the LLM only interprets the numb
 flowchart TD
   P["Data pack: prices, SEC statements, rates, macro, news"] --> V["Deterministic valuation + quality scores"]
   V --> A["7 analyst seats in parallel"]
-  A --> D["Debate: bull vs bear (or devil's advocate if unanimous)"]
-  D --> T["Trader proposes a position"]
+  A --> T["Trader: bear case, bull case, weighing, plan"]
   T --> R["3 risk seats: aggressive / neutral / conservative"]
   R --> J["2 parallel judges + ablation judge"]
   J --> G["Guardrails: conviction caps, FOMC block, size limits"]
@@ -79,7 +78,7 @@ Without Cursor, the analyst-consensus and fiscal-news web lookups are skipped. T
 .venv/bin/python pipeline.py AAPL --no-whatsapp
 ```
 
-The report is written to `reports/AAPL-<timestamp>.md`. A run takes about 8 to 15 minutes and makes 12 to 17 model calls.
+The report is written to `reports/AAPL-<timestamp>.md`. A run takes about 8 to 15 minutes and makes about 14 model calls.
 
 **4. Teach your OpenClaw agent the command**
 
@@ -130,7 +129,7 @@ Ablation (no dollar fair value): SELL conviction 62 - same call
 - **What changed since last run:** a diff against the previous report for the same ticker.
 - **Macro scorecard:** the 8 angles in a table, with an impact label for the asset.
 - **Valuation models, anchors, base rates, quality overlay:** the numbers the committee saw.
-- **Debate and Trader and risk:** the full committee transcript.
+- **Trader and Risk seats:** the trader's bull and bear cases, its plan, and the risk discussion.
 
 To score past calls and compare a paper book against dollar-cost averaging:
 
@@ -142,7 +141,7 @@ To score past calls and compare a paper book against dollar-cost averaging:
 
 ```
 pipeline.py            orchestrator: pack -> committee -> report
-agents_llm.py          LLM provider layer, seats, debate, judges
+agents_llm.py          LLM provider layer, seats, trader, judges
 data.py                Yahoo / SEC / treasury data fetch
 valuation.py           valuation models and quality scores
 macro*.py              macro scorecard, tilt rules, historical backtest
@@ -177,7 +176,7 @@ docs/DESIGN.md         full design note
 - **The macro tilt is context, not a signal.** The included `macro-backtest` found that the tilt did not reliably predict QQQ or gold returns.
 - **Data is free and imperfect.** It uses Yahoo, SEC filings, Treasury and FRED. Statements can be months stale, and the report prints how stale.
 - **Web-searched figures are unverified.** Analyst consensus pulled by LLM web search is flagged as such in the report.
-- **Cost and time.** Each ticker run makes 12 to 17 model calls, so check your provider's pricing.
+- **Cost and time.** Each ticker run makes about 14 model calls, so check your provider's pricing.
 
 ## License
 

@@ -61,14 +61,9 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A["7 analysts in parallel"] --> B{"All same signal?"}
-  B -->|yes| C["Devil advocate"]
-  B -->|no| D["Bull / Bear 2 rounds"]
-  C --> E["Research judge"]
-  D --> E
-  E --> F["Trader"]
-  F --> G["3 risk seats"]
-  G --> H["Risk judge"]
+  A["7 analysts in parallel"] --> F["Trader: case against majority, other case, weighing, plan"]
+  F --> G["3 risk seats (see votes + full discussion)"]
+  G --> H["2 risk judges + ablation judge (parallel)"]
   H --> I["Report + WhatsApp"]
 ```
 
@@ -79,11 +74,11 @@ flowchart TD
 3. Optional web search if growth or Street target is missing
 4. Regime → models → quality → coverage → JSON pack (incl. cached macro tilt)
 5. Seven analysts (parallel, text-only)
-6. Debate: one devil’s advocate **or** Bull/Bear two rounds
-7. Research judge → trader → three risk seats → risk judge
+6. Trader argues both cases (against the analyst majority first) and commits to a plan
+7. Three risk seats → two risk judges + ablation judge
 8. Write report, send summary (holding period = user input, default 12 months)
 
-**12–17 model calls** on Grok 4.7 Medium Fast. 360s each (same-input calls swing from ~40s to >240s under parallel load; a timed-out call is abandoned, not waited on). 30 min budget. Debate and risk-seat turns are asked for ≤300 words and hard-truncated at 3,000 chars (the model sometimes ignores word caps), so each next seat's input stays bounded.
+**~14 model calls** (plus web-search lookups when needed) on Grok 4.7 Medium Fast by default. 360s each (same-input calls swing from ~40s to >240s under parallel load; a timed-out call is abandoned, not waited on). 30 min budget. Debate and risk-seat turns are asked for ≤300 words and hard-truncated at 3,000 chars (the model sometimes ignores word caps), so each next seat's input stays bounded.
 
 ---
 
@@ -391,7 +386,7 @@ invalidation) with disagreement on the record. All analysis calls use
 **Ground:** interpretation, not a data vendor. A cited pack number is
 stronger than an uncited adjective. Judge is told to discount uncited
 claims. Personas can still overweight the fade-model dollar gap (seen on
-AAPL/TSLA). Read the debate, not only the emoji.
+AAPL/TSLA). Read the trader's bull/bear sections, not only the emoji.
 
 | Seat | Adds | Ground |
 |---|---|---|
@@ -403,9 +398,14 @@ AAPL/TSLA). Read the debate, not only the emoji.
 | Burry | Accruals, Beneish, Z, implied vs history | Lens, not a new model |
 | Macro | Regime scorecard + tilt (Layer 0); primary for ETFs, secondary context for single stocks | Bound to `macro_rules.py` output, not re-derived |
 
-**Debate:** seven-way agreement → one devil’s advocate (anti-groupthink,
-cheaper). Split votes → Bull/Bear two rounds, every claim must cite a
-number. Research judge picks who carried it.
+**No separate debate.** Across 18 saved reports the Bull/Bear rounds never
+flipped the analyst majority's direction, and they were five sequential
+calls - the slowest, most timeout-prone stage. The trader now writes the
+case **against** the analyst majority first (a tie counts as bearish), then
+the other case, a weighing, and the plan; a unanimous panel gets an
+explicit skeptic instruction in place of the old devil's advocate. Risk
+seats and both risk judges also see the analyst votes, and each risk seat
+sees every earlier risk turn in full (each turn is already capped).
 
 **Risk:** trader proposes size 0–10% and invalidation → aggressive /
 conservative / neutral → risk judge. **The holding period is the user's

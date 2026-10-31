@@ -91,8 +91,7 @@ def test_run_decision_enforces_long_only_size_and_action_label(
              f'"size_pct": {judge_size}, "horizon_months": 12, '
              f'"invalidation": "x", "rationale": "y"}}')
     monkeypatch.setattr(A, "ask", lambda client, system, user: reply)
-    debate = {"judge_text": "verdict", "judge": {"signal": "neutral"}}
-    out = A.run_decision(_client(), "{}", {}, debate, _budget())
+    out = A.run_decision(_client(), "{}", {}, _budget())
     d = out["decision"]
     assert d["signal"] == signal
     assert d["size_pct"] == expected_size
@@ -109,8 +108,7 @@ def test_run_decision_horizon_comes_from_the_user_not_the_judge_json(monkeypatch
         return reply
 
     monkeypatch.setattr(A, "ask", fake_ask)
-    debate = {"judge_text": "verdict", "judge": {"signal": "neutral"}}
-    out = A.run_decision(_client(), "{}", {}, debate, _budget(), horizon_months=6)
+    out = A.run_decision(_client(), "{}", {}, _budget(), horizon_months=6)
     assert out["decision"]["horizon_months"] == 6
     trader_prompt, judge_prompt = prompts[0], prompts[-1]
     assert "6 months" in trader_prompt and "6 months" in judge_prompt
@@ -119,8 +117,7 @@ def test_run_decision_horizon_comes_from_the_user_not_the_judge_json(monkeypatch
 
 def test_run_decision_defaults_to_twelve_months(monkeypatch):
     monkeypatch.setattr(A, "ask", lambda client, system, user: "no json")
-    debate = {"judge_text": "verdict", "judge": {"signal": "neutral"}}
-    out = A.run_decision(_client(), "{}", {}, debate, _budget())
+    out = A.run_decision(_client(), "{}", {}, _budget())
     assert out["decision"]["horizon_months"] == A.DEFAULT_HORIZON_MONTHS == 12
 
 
@@ -142,8 +139,7 @@ def test_run_analysts_fills_the_horizon_into_persona_prompts(monkeypatch):
 
 def test_run_decision_fallback_decision_is_long_only_safe(monkeypatch):
     monkeypatch.setattr(A, "ask", lambda client, system, user: "no json here at all")
-    debate = {"judge_text": "verdict", "judge": {"signal": "neutral"}}
-    out = A.run_decision(_client(), "{}", {}, debate, _budget())
+    out = A.run_decision(_client(), "{}", {}, _budget())
     assert out["decision"]["size_pct"] == 0.0
     assert out["decision"]["action"] == "HOLD"
 
@@ -358,24 +354,38 @@ def test_fetch_market_consensus_omits_eps_revision_trend_when_absent(monkeypatch
     assert "eps_revision_90d_detail" not in out
 
 
-@pytest.mark.parametrize("signals,expected_calls", [
-    (["bullish", "bearish"], 5),   # bull, bear, bull2, bear2, judge
-    (["bullish", "bullish"], 2),   # devil's advocate, judge
+@pytest.mark.parametrize("signals,first,unanimous", [
+    (["bearish", "bearish", "bullish"], "## Bull case", False),   # against a bearish majority
+    (["bullish", "bullish", "bearish"], "## Bear case", False),   # against a bullish majority
+    (["bullish", "bearish"], "## Bull case", False),              # tie counts as bearish
+    (["neutral", "neutral"], "## Bull case", True),
 ])
-def test_run_debate_caps_every_debate_turn_but_not_the_judge(monkeypatch, signals, expected_calls):
-    systems: list[str] = []
+def test_trader_leads_with_the_case_against_the_majority(signals, first, unanimous):
+    analysts = {f"s{i}": {"signal": s} for i, s in enumerate(signals)}
+    prompt = A.trader_system(analysts, 6)
+    other = "## Bear case" if first == "## Bull case" else "## Bull case"
+    assert prompt.index(first) < prompt.index(other) < prompt.index("## Weighing")
+    assert "6-month holding period" in prompt and "## Plan" in prompt
+    assert ("unanimously" in prompt) is unanimous
+
+
+def test_run_decision_has_no_debate_and_shares_votes(monkeypatch):
+    calls: list[tuple[str, str]] = []
 
     def fake_ask(client, system, user):
-        systems.append(system)
-        return '{"signal": "hold", "confidence": 50, "reasoning": "x"}'
+        calls.append((system, user))
+        return "RISK TURN" if "risk manager" in system else '{"signal": "hold"}'
 
     monkeypatch.setattr(A, "ask", fake_ask)
-    analysts = {f"s{i}": {"signal": s} for i, s in enumerate(signals)}
-    A.run_debate(_client(), "{}", analysts, _budget())
-    cap = A.TURN_RULE
-    assert len(systems) == expected_calls
-    assert all(cap in s for s in systems[:-1])
-    assert cap not in systems[-1]
+    analysts = {"technical": {"signal": "bullish", "reasoning": "VOTE-MARKER"}}
+    A.run_decision(_client(), "{}", analysts, _budget(), pack_json_redacted="{}")
+    assert len(calls) == 1 + 3 + 3  # trader, 3 risk seats, 2 judges + ablation
+    assert calls[0][0].startswith("You are the trader")
+    risk = [u for s, u in calls if "risk manager" in s]
+    judges = [u for s, u in calls if s.startswith("You are the Risk Judge")]
+    assert all("VOTE-MARKER" in u for u in risk + judges)
+    # neutral (last) seat sees both earlier turns in full
+    assert risk[-1].count("RISK TURN") == 2
 
 
 def test_run_decision_caps_risk_seats_and_truncates_overlong_turns(monkeypatch):
@@ -387,14 +397,13 @@ def test_run_decision_caps_risk_seats_and_truncates_overlong_turns(monkeypatch):
         return huge if "risk manager" in system else '{"signal": "hold"}'
 
     monkeypatch.setattr(A, "ask", fake_ask)
-    debate = {"judge_text": "verdict"}
-    out = A.run_decision(_client(), "{}", {}, debate, _budget())
+    out = A.run_decision(_client(), "{}", {}, _budget())
     risk_systems = [s for s, _ in calls if "risk manager" in s]
     assert len(risk_systems) == 3
     assert all(A.TURN_RULE in s for s in risk_systems)
     assert all(len(t) < A.TURN_CHAR_CAP + 100 for t in out["risk_transcript"])
     judge_user = calls[-1][1]
-    assert len(judge_user) < 4 * (A.TURN_CHAR_CAP + 100)
+    assert len(judge_user) < 5 * (A.TURN_CHAR_CAP + 100)
 
 
 def test_capped_leaves_short_text_and_marks_truncation():
@@ -478,7 +487,7 @@ def _run_with_judges(monkeypatch, judge_replies, ablation_reply=None):
 
     monkeypatch.setattr(A, "ask", fake_ask)
     out = A.run_decision(_client(), "{}", {"valuation": {"signal": "bearish"}, "macro": {"signal": "neutral"}},
-                         {"judge_text": "v"}, _budget(), 12,
+                         _budget(), 12,
                          pack_json_redacted="REDACTED" if ablation_reply else None)
     return out, seen
 

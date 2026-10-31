@@ -345,7 +345,7 @@ def _committee_check_lines(d: dict) -> list[str]:
     return out
 
 
-def write_report(pack, analysts, debate, decision, ts: str, pack_path: Path | None,
+def write_report(pack, analysts, decision, ts: str, pack_path: Path | None,
                  model_id: str, changes: dict | None = None) -> Path:
     REPORTS.mkdir(exist_ok=True)
     tk = pack["ticker"]
@@ -494,17 +494,15 @@ def write_report(pack, analysts, debate, decision, ts: str, pack_path: Path | No
                 cit_bit += f", unverified: {cit['unverified']}"
             cit_bit += "]"
         lines.append(f"- **{name}**: {a['signal']} ({a['confidence']}) — {a['reasoning']}{cit_bit}")
-    lines += ["", f"## Debate ({debate['mode']})", ""]
-    lines += [t + "\n" for t in debate["transcript"]]
-    lines += [f"**Judge:** {debate['judge_text']}", "",
-              "## Trader & risk", "", decision["trader_text"], ""]
+    lines += ["", "## Trader: bull vs bear and plan", "", decision["trader_text"], "",
+              "## Risk seats", ""]
     lines += [t + "\n" for t in decision["risk_transcript"]]
     lines += [f"**Risk judge:** {decision['judge_text']}", "", "---", DISCLAIMER]
     path.write_text("\n".join(lines))
     return path
 
 
-def short_summary(pack, analysts, debate, decision, report_path) -> str:
+def short_summary(pack, analysts, decision, report_path) -> str:
     v, d = pack["valuation"], decision["decision"]
     f = pack["fundamentals"]
     emoji = {"buy": "🟢", "sell": "🔴", "hold": "🟡"}[d["signal"]]
@@ -533,8 +531,7 @@ def short_summary(pack, analysts, debate, decision, report_path) -> str:
     if qbits:
         out.append("Quality: " + " ".join(qbits))
     out.append(f"Votes: {votes}")
-    out.append(f"Debate({debate['mode']}): {debate['judge']['signal']} — "
-               f"{d['rationale'][:160]}")
+    out.append(f"Why: {d['rationale'][:160]}")
     out.append(f"Invalidation: {d['invalidation'][:120]}")
     if d.get("guardrail_notes"):
         out.append(f"⚠️ Guardrail overrides applied ({len(d['guardrail_notes'])}) — see report")
@@ -658,16 +655,15 @@ def run_ticker(ticker: str, notify: bool, horizon_months: int = A.DEFAULT_HORIZO
         pj = pack_for_llm(pack)
         pj_redacted = pack_for_llm(pack, redact_fair_value=True)
         analysts = A.run_analysts(client, pack, pj, pj_redacted, budget)
-        debate = A.run_debate(client, pj, analysts, budget)
-        decision = A.run_decision(client, pj, analysts, debate, budget, horizon_months,
+        decision = A.run_decision(client, pj, analysts, budget, horizon_months,
                                   pack_json_redacted=pj_redacted)
         decision["decision"] = G.apply_guardrails(pack, analysts, decision["decision"])
         ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
         pack_path = save_pack(pack, client, ts)
-        report = write_report(pack, analysts, debate, decision, ts=ts,
+        report = write_report(pack, analysts, decision, ts=ts,
                               pack_path=pack_path, model_id=client.model.id,
                               changes=_changes_since_last(pack, f"{ticker}-{ts}"))
-        summary = short_summary(pack, analysts, debate, decision, report)
+        summary = short_summary(pack, analysts, decision, report)
         print(summary)
         if notify:
             send_whatsapp(summary)

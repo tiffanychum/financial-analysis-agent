@@ -43,7 +43,7 @@ check_ticker() {
 if [[ "$ARG_UP" == "MACRO" ]]; then
     LOG="$DIR/reports/.last-run-MACRO.log"
     nohup "$PY" "$DIR/pipeline.py" "MACRO" >"$LOG" 2>&1 &
-    echo "🌐 Macro regime scan started (5 model calls, ~1-2 min). I'll message you the tech ETF / gold tilt when it's done; full report lands in finance-agents/reports/."
+    echo "🌐 Macro regime scan started (5 model calls, ~1-2 min). I'll message you the tech ETF / gold tilt when it's done; full report lands in reports/."
     exit 0
 fi
 
@@ -57,7 +57,7 @@ if [[ "$ARG_UP" == "MACRO-BACKTEST" ]]; then
     TICKER_UP=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]')
     LOG="$DIR/reports/.last-run-MACRO-BACKTEST-${TICKER_UP}.log"
     nohup "$PY" "$DIR/pipeline.py" "MACRO-BACKTEST" "$TICKER" ${HORIZON_ARGS[@]+"${HORIZON_ARGS[@]}"} >"$LOG" 2>&1 &
-    echo "📈 Macro backtest of ${TICKER_UP} started (no model calls, ~1 min). I'll message you how each macro regime played out historically; full report lands in finance-agents/reports/."
+    echo "📈 Macro backtest of ${TICKER_UP} started (no model calls, ~1 min). I'll message you how each macro regime played out historically; full report lands in reports/."
     exit 0
 fi
 
@@ -67,4 +67,4 @@ HORIZON_NOTE="${2:-12}-month holding period"
 
 LOG="$DIR/reports/.last-run-${ARG_UP}.log"
 nohup "$PY" "$DIR/pipeline.py" "$ARG" ${HORIZON_ARGS[@]+"${HORIZON_ARGS[@]}"} >"$LOG" 2>&1 &
-echo "🔬 Analysis of ${ARG_UP} (${HORIZON_NOTE}) started (12-17 model calls, ~8-15 min). I'll message you the summary when it's done; full report lands in finance-agents/reports/."
+echo "🔬 Analysis of ${ARG_UP} (${HORIZON_NOTE}) started (~14 model calls, ~6-12 min). I'll message you the summary when it's done; full report lands in reports/."
