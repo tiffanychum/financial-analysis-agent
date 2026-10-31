@@ -1,4 +1,4 @@
-# finance-analysis-agent — design note
+# financial-analysis-agent — design note
 
 Detached research pipeline. Trigger it; it gathers numbers, values them with
 formulas, then an LLM committee **interprets** the pack. The LLM does not

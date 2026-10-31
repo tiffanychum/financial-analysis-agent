@@ -1,4 +1,4 @@
-# finance-analysis-agent
+# financial-analysis-agent
 
 A committee of AI analysts that researches a stock, ETF or gold and writes a report, built to run as a command inside [OpenClaw](https://github.com/openclaw/openclaw).
 
@@ -12,27 +12,33 @@ The key rule is that **formulas do the math and the LLM only interprets the numb
 
 ```mermaid
 flowchart TD
-  P["Data pack: prices, SEC statements, rates, macro, news"] --> V["Deterministic valuation + quality scores"]
-  V --> A["7 analyst seats in parallel"]
-  A --> T["Trader: bear case, bull case, weighing, plan"]
-  T --> R["3 risk seats: aggressive / neutral / conservative"]
-  R --> J["2 parallel judges + ablation judge"]
-  J --> G["Guardrails: conviction caps, FOMC block, size limits"]
-  G --> O["Report + optional WhatsApp summary"]
+  P["1. Data pack: prices, SEC statements, rates, macro, news"] --> V["2. Deterministic scores: macro, valuation, quality, anchors, base rates"]
+  V --> A["3. Seven analyst seats in parallel"]
+  A --> T["4. Trader: bear case, bull case, weighing, plan"]
+  T --> R["5. Three risk seats: aggressive / conservative / neutral"]
+  R --> J["6. Two judges + ablation judge"]
+  J --> G["7. Guardrails: conviction caps, FOMC block, size limits"]
+  G --> O["8. Report + optional WhatsApp summary"]
+  O -.-> K["9. Later: score the call against real prices"]
 ```
 
-| Layer | What it gives you |
-|---|---|
-| **Macro scorecard** | 8 angles (policy path, liquidity, inflation, real yields, growth/recession, financial conditions, dollar, event calendar), each marked supportive / headwind / neutral for tech and for gold |
-| **Valuation models** | Residual operating income, abnormal earnings growth, owner earnings, and a reverse DCF that shows what growth the price implies |
-| **Quality overlay** | Piotroski F, Mohanram G, Altman Z, Beneish M, accruals, ROCE |
-| **Own-history anchors** | Where today's multiples sit in the stock's own history (percentiles) |
-| **Signal base rates** | How often golden/death cross, RSI and MACD signals actually paid off for this ticker, with confidence intervals |
-| **7 analyst seats** | fundamental, valuation, technical, sentiment, Buffett lens, Burry lens, macro |
-| **Honest-committee checks** | Two judges must agree or conviction is capped. An ablation judge decides without the dollar fair value. The decision includes an invalidation price. |
-| **Track record** | `track_accuracy.py` scores past calls against real prices and compares a paper book with plain dollar-cost averaging |
+| # | Layer | What it does | Why it matters |
+|---|---|---|---|
+| 1 | **Data pack** | Gathers prices, SEC statements, Treasury rates, macro series and news into one JSON file | Every later step reads the same frozen facts, so nothing is looked up mid-argument or made up. You also get a saved snapshot of exactly what the committee knew that day. |
+| 2a | **Macro scorecard** | Rates 8 angles (Fed path, liquidity, inflation, real yields, growth, financial conditions, dollar, event calendar) as supportive, headwind or neutral for tech and for gold | Rules are consistent and testable. It shows whether the backdrop helps or hurts and whether an event like FOMC argues for waiting. The included backtest found the tilt doesn't predict returns, so it is labeled as context, not a signal. |
+| 2b | **Valuation models** | Residual operating income, abnormal earnings growth, owner earnings, and a reverse DCF | Formulas don't hallucinate. The reverse DCF needs the fewest assumptions: it asks what growth the price already assumes, so you see whether the price needs growth the company has never delivered. |
+| 2c | **Quality overlay** | Piotroski F, Mohanram G, Altman Z, Beneish M, accruals, ROCE | Separates "great business" from "great stock". It shows financial health, bankruptcy risk, earnings quality and accounting red flags. |
+| 2d | **Own-history anchors** | Where today's P/S, EV/FCF and implied growth sit in the stock's own history, as percentiles | Compares the company with itself, which avoids the "every stock is different" problem of peer comparisons. It tells you whether the stock is cheap or expensive *for this stock*. |
+| 2e | **Signal base rates** | How often golden/death cross, RSI and MACD signals paid off for this ticker, with confidence intervals | Chart signals are folklore until measured, and many are coin flips for a given stock. This shows which signals mean something here and which to ignore. |
+| 3 | **Seven analyst seats** | Fundamental, valuation, technical, sentiment, Buffett lens, Burry lens and macro each vote, citing pack numbers | Different lenses catch different risks, and a citation check flags numbers that aren't in the pack. You see where the evidence agrees and where it splits, such as "great business, expensive stock". |
+| 4 | **Trader** | Writes the case against the analyst majority first, then the other case, a weighing and a concrete plan | Forces both sides to be argued, and leading with the opposing case counters confirmation bias. You get the strongest reasons for and against, the one fact that would change the call, and a size and invalidation price. |
+| 5 | **Three risk seats** | Aggressive, conservative and neutral managers challenge the plan in turn, seeing the votes and the full discussion | A plan should survive pushback from both "too timid" and "too risky" before it is final. It shows whether the size and timing hold up and which risks matter most. |
+| 6 | **Two judges + ablation judge** | Two identical judges issue the call in parallel. A third decides without the dollar fair value. | The model has no fixed seed, so two runs test stability, and the ablation tests whether the decision depends on the valuation model. A disagreement or a flip lowers conviction. |
+| 7 | **Guardrails** | Hard rules: conviction caps on judge disagreement, ablation flips or failed citations; no new sizing right before FOMC; long-only sizing | Some limits shouldn't be left to model judgment. Every cap is listed as an explicit override in the report, so you can see why conviction was lowered. |
+| 8 | **Report + WhatsApp** | A markdown report with every number and argument, a "what changed since last run" section, and an optional short summary | Everything is auditable, and the diff shows what moved the call since the last run. |
+| 9 | **Track record** | `track_accuracy.py` checks past calls against real prices and invalidation levels, and compares a paper book with dollar-cost averaging | The only real test of a research process is its results over time. It shows whether the committee beats simply buying a little every month. |
 
-Funds and gold have no company statements, so for them the valuation models and quality scores are n/a. The macro scorecard, technicals and base rates carry the analysis instead.
+Funds and gold have no company statements, so rows 2b and 2c are n/a for them. The macro scorecard, technicals and base rates carry the analysis instead.
 
 The full design, with every formula and the reasoning behind each choice, is in [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -43,8 +49,8 @@ You need a working OpenClaw install and Python 3.10+. For OpenClaw setup, see th
 **1. Clone and install**
 
 ```bash
-git clone https://github.com/tiffanychum/finance-analysis-agent.git
-cd finance-analysis-agent
+git clone https://github.com/tiffanychum/financial-analysis-agent.git
+cd financial-analysis-agent
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
@@ -82,7 +88,7 @@ The report is written to `reports/AAPL-<timestamp>.md`. A run takes about 8 to 1
 
 **4. Teach your OpenClaw agent the command**
 
-Open [openclaw/workspace-snippet.md](openclaw/workspace-snippet.md), replace `/path/to/finance-analysis-agent` with your clone path, and paste it into your OpenClaw workspace `AGENTS.md` (usually `~/.openclaw/workspace/AGENTS.md`).
+Open [openclaw/workspace-snippet.md](openclaw/workspace-snippet.md), replace `/path/to/financial-analysis-agent` with your clone path, and paste it into your OpenClaw workspace `AGENTS.md` (usually `~/.openclaw/workspace/AGENTS.md`).
 
 Then message your agent on any connected channel:
 

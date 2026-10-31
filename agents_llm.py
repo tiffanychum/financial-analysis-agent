@@ -149,7 +149,7 @@ def _openai_complete(client: LLMClient, prompt: str) -> str:
 # look up the product's rules with no tools - stub replies and a 38k-char
 # risk-judge loop, so the decision fell back to "unparseable". An empty
 # non-repo cwd plus an explicit no-tools preamble keeps calls text-only.
-AGENT_CWD = Path(tempfile.gettempdir()) / "finance-analysis-agent-llm"
+AGENT_CWD = Path(tempfile.gettempdir()) / "financial-analysis-agent-llm"
 TEXT_ONLY_PREAMBLE = ("You have no tools, files, or workspace: everything you need is in "
                       "this message. Answer directly in this single reply.")
 
