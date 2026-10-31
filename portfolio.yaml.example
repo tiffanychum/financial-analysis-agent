@@ -1,0 +1,27 @@
+# Copy to portfolio.yaml (gitignored - never commit real holdings) to feed
+# the trader/risk seats live concentration + existing-position context.
+# Entirely optional: no portfolio.yaml means no portfolio context, not an
+# error.
+#
+# currency: informational label only for the report - no live FX
+# conversion happens here (see portfolio.py's module docstring). Every
+# `shares` holding is assumed to already be priced in this currency; a
+# holding in a different currency should use `value` (pre-converted by you)
+# instead of `shares`.
+currency: USD
+
+# Cash sitting on the sidelines, in the currency above.
+cash: 5000
+
+holdings:
+  AAPL:
+    shares: 30          # live-priced via data.spot_price at report time
+  EQQQ.L:
+    value: 8000          # pre-converted value - use this for cross-currency holdings
+
+# Optional target weights (%) - the report shows actual vs target so you can
+# see drift. Omit entirely if you don't rebalance to targets.
+targets:
+  AAPL: 20
+  EQQQ.L: 40
+  cash: 10

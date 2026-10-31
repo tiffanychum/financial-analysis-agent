@@ -1,0 +1,11 @@
+numpy>=2.0
+pandas>=2.2
+yfinance>=1.0
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+PyYAML>=6.0
+python-dotenv>=1.0
+cursor-sdk>=1.0          # default LLM provider
+openai>=1.50             # only used when LLM_PROVIDER=openai
+pytest>=8.0,<9.2         # tests (9.2.0 crashes on Python 3.10.0)

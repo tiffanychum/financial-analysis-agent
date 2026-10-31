@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+# Your analyses, saved data packs and caches stay local
+reports/
+# Real holdings never get committed (use portfolio.yaml.example as the template)
+portfolio.yaml
