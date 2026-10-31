@@ -405,7 +405,10 @@ def run_paper_books(reports: list[ParsedReport]) -> dict[str, dict]:
     return out
 
 
-def run_tracker(reports_dir: Path = REPORTS, horizons_days: tuple[int, ...] = (30, 90, 180, 365)) -> dict:
+def run_tracker(reports_dir: Path = REPORTS, horizons_days: tuple[int, ...] = (30, 90, 180, 365),
+                ticker: str | None = None) -> dict:
+    """Scores every saved report (cached in sqlite), then summarizes; `ticker`
+    only narrows the summary, so a filtered run still warms the full cache."""
     conn = sqlite3.connect(DB_PATH)
     _ensure_schema(conn)
     scored, skipped = 0, 0
@@ -444,18 +447,22 @@ def run_tracker(reports_dir: Path = REPORTS, horizons_days: tuple[int, ...] = (3
     for r in parsed:
         check_invalidation(conn, r)
     conn.commit()
-    summary = summarize(conn, horizons_days)
+    if ticker:
+        parsed = [r for r in parsed if r.ticker == ticker]
+    summary = summarize(conn, horizons_days, ticker)
     summary["invalidation"] = dict(zip(
         ("checked", "triggered", "complete"),
         conn.execute("SELECT COUNT(*), COALESCE(SUM(triggered),0), COALESCE(SUM(window_complete),0) "
-                     "FROM invalidation_checks").fetchone()))
+                     "FROM invalidation_checks WHERE (?1 IS NULL OR ticker = ?1)",
+                     (ticker,)).fetchone()))
     summary["not_checkable"] = sum(r.invalidation is None for r in parsed)
     conn.close()
-    return {"scored_new": scored, "skipped_unparseable": skipped,
+    return {"scored_new": scored, "skipped_unparseable": skipped, "n_reports": len(parsed),
             "paper_books": run_paper_books(parsed), **summary}
 
 
-def summarize(conn: sqlite3.Connection, horizons_days: tuple[int, ...]) -> dict:
+def summarize(conn: sqlite3.Connection, horizons_days: tuple[int, ...],
+              ticker: str | None = None) -> dict:
     out = {}
     macro_out = {}
     for horizon in horizons_days:
@@ -464,7 +471,8 @@ def summarize(conn: sqlite3.Connection, horizons_days: tuple[int, ...]) -> dict:
         # from the same table but must never be averaged into one hit rate.
         rows = conn.execute(
             "SELECT hit, hit_vs_benchmark FROM scored_reports "
-            "WHERE days_held=? AND macro_asset_class IS NULL", (horizon,)).fetchall()
+            "WHERE days_held=?1 AND macro_asset_class IS NULL AND (?2 IS NULL OR ticker = ?2)",
+            (horizon, ticker)).fetchall()
         if rows:
             n = len(rows)
             hits = sum(r[0] for r in rows)
@@ -479,6 +487,8 @@ def summarize(conn: sqlite3.Connection, horizons_days: tuple[int, ...]) -> dict:
         macro_rows = conn.execute(
             "SELECT macro_asset_class, hit FROM scored_reports "
             "WHERE days_held=? AND macro_asset_class IS NOT NULL", (horizon,)).fetchall()
+        if ticker:
+            macro_rows = []  # macro tilt scores are not per-ticker
         if macro_rows:
             by_class: dict[str, list[int]] = {}
             for cls, hit in macro_rows:
@@ -488,6 +498,96 @@ def summarize(conn: sqlite3.Connection, horizons_days: tuple[int, ...]) -> dict:
                      "hit_rate_95ci": wilson_interval(sum(hits), len(hits))}
                 for cls, hits in by_class.items()}
     return {"hit_rate_by_horizon": out, "macro_hit_rate_by_horizon": macro_out}
+
+
+MIN_RELIABLE_N = 10  # below this a hit rate is an anecdote, not evidence
+
+
+def _n(count: int, noun: str) -> str:
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def _pct(x: float) -> str:
+    return f"{x:.0%}"
+
+
+def _caveats(result: dict) -> list[str]:
+    ns = [s["n"] for s in result["hit_rate_by_horizon"].values()]
+    out = []
+    if not ns:
+        out.append("No report is old enough to score yet (the shortest window is 30 days).")
+    elif max(ns) < MIN_RELIABLE_N:
+        out.append(f"Too early to judge: the largest sample is {max(ns)} calls; "
+                   f"need {MIN_RELIABLE_N}+ before a hit rate means much.")
+    books = result["paper_books"].values()
+    if books and not any(b["n_buys"] for b in books):
+        out.append("The agent issued no BUY calls, so its paper book stayed in cash: "
+                   "that shows caution, not skill or failure.")
+    return out
+
+
+def format_summary(result: dict, ticker: str | None = None) -> str:
+    """Short phone-sized message in plain English."""
+    scope = ticker or f"{len(result['paper_books'])} tickers"
+    out = [f"📈 Track record — {result['n_reports']} reports, {scope}", ""]
+    out.append("Were the calls right?")
+    if result["hit_rate_by_horizon"]:
+        for horizon, st in result["hit_rate_by_horizon"].items():
+            hits = round(st["hit_rate"] * st["n"])
+            out.append(f"• after {horizon}: {hits} of {st['n']} right ({_pct(st['hit_rate'])})")
+    else:
+        out.append("• none old enough to score yet")
+    inv = result["invalidation"]
+    out += ["", "\"I was wrong\" prices",
+            f"{_n(inv['checked'], 'report')} set a checkable level · {inv['triggered']} breached", ""]
+    if result["paper_books"]:
+        out.append("Paper book vs simply buying a little each month")
+        for t, b in result["paper_books"].items():
+            out.append(f"• {t}: agent {b['agent_return_pct']:+.1f}% vs monthly buying "
+                       f"{b['dca_return_pct']:+.1f}% ({_n(b['n_reports'], 'report')}, {_n(b['n_buys'], 'buy')})")
+    notes = _caveats(result)
+    if notes:
+        out += [""] + [f"⚠️ {n}" for n in notes]
+    return "\n".join(out)
+
+
+def format_report(result: dict, ts: str, ticker: str | None = None) -> str:
+    """Full markdown report written to reports/TRACK-<ts>.md."""
+    lines = [f"# Track record{' — ' + ticker if ticker else ''} — {ts} UTC", "",
+             format_summary(result, ticker), "",
+             "## Hit rate by horizon", "",
+             "A **hit** means: a BUY went up, an AVOID went down, or a HOLD stayed within "
+             f"±{HOLD_BAND_PCT:g}%. The range is a 95% confidence interval; "
+             "small samples give wide ranges.", ""]
+    if result["hit_rate_by_horizon"]:
+        lines += ["| Window | Calls | Hit rate | 95% range | Beat benchmark |", "|---|---|---|---|---|"]
+        for horizon, st in result["hit_rate_by_horizon"].items():
+            lo, hi = st["hit_rate_95ci"]
+            bench = (f"{_pct(st['hit_rate_vs_benchmark'])} (n={st['n_vs_benchmark']})"
+                     if "hit_rate_vs_benchmark" in st else "n/a")
+            lines.append(f"| {horizon} | {st['n']} | {_pct(st['hit_rate'])} | "
+                         f"{_pct(lo)}-{_pct(hi)} | {bench} |")
+    else:
+        lines.append("Nothing old enough to score yet.")
+    inv = result["invalidation"]
+    lines += ["", "## \"I was wrong\" prices", "",
+              f"{inv['checked']} reports state a checkable level ({inv['complete']} holding windows "
+              f"finished), {inv['triggered']} were breached by a daily close. "
+              f"{result['not_checkable']} older reports have no checkable level.", ""]
+    lines += ["## Paper book vs monthly buying", "",
+              "The paper book follows each report (BUY invests its size, AVOID sells, HOLD does nothing) "
+              "starting from the same cash as a plan that just buys 1/12 each month.", ""]
+    for t, b in result["paper_books"].items():
+        lines.append(f"- **{t}** since {b['first_report']}: agent {b['agent_return_pct']:+.1f}% vs "
+                     f"monthly buying {b['dca_return_pct']:+.1f}% ({_n(b['n_reports'], 'report')}, {_n(b['n_buys'], 'buy')})")
+    if not result["paper_books"]:
+        lines.append("No report has a saved price yet.")
+    if result["macro_hit_rate_by_horizon"]:
+        lines += ["", "## Macro tilt hit rate (separate from stock picks)", ""]
+        for horizon, by_class in result["macro_hit_rate_by_horizon"].items():
+            for cls, st in by_class.items():
+                lines.append(f"- {horizon} {cls}: {_pct(st['hit_rate'])} (n={st['n']})")
+    return "\n".join(lines + ["", "---", "⚠️ Research only, not financial advice.", ""])
 
 
 def main() -> None:

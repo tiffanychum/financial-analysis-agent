@@ -22,10 +22,15 @@ turn deadlock the session).
 On `macro` (no ticker - standalone Fed/liquidity/inflation/growth/dollar regime scan), run
 exactly `/path/to/financial-analysis-agent/scripts/finance-agent.sh macro`. Same rules; ~1-2 min.
 
+On `track` or `track <TICKER>` (how did past analyses do against real prices: hit rate, "I was
+wrong" breaches, paper book vs monthly buying), run exactly
+`/path/to/financial-analysis-agent/scripts/finance-agent.sh track [TICKER]`. Same rules; no model
+calls, ~15s. It messages a plain-English summary and saves `reports/TRACK-<ts>.md`.
+
 On `macro-backtest <TICKER> [MONTHS]` (does the macro tilt historically predict this ticker's
 forward returns), run exactly
 `/path/to/financial-analysis-agent/scripts/finance-agent.sh macro-backtest <TICKER> [MONTHS]`.
 Same rules; no model calls, ~20s.
 
 <!-- Optional: add a one-line cheat-sheet entry to TOOLS.md:
-     `analyze <TICKER> [MONTHS]` | `macro` | `macro-backtest <TICKER> [MONTHS]` -> financial-analysis-agent/scripts/finance-agent.sh -->
+     `analyze <TICKER> [MONTHS]` | `macro` | `track [TICKER]` | `macro-backtest <TICKER> [MONTHS]` -> financial-analysis-agent/scripts/finance-agent.sh -->

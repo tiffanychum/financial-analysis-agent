@@ -293,3 +293,24 @@ def test_send_whatsapp_is_noop_without_target(monkeypatch):
     monkeypatch.setattr(P, "WHATSAPP_TO", "")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("must not shell out"))
     P.send_whatsapp("hi")
+
+
+@pytest.mark.parametrize("ticker", [None, "AAPL"])
+def test_run_track_writes_report_and_summary(ticker, tmp_path, monkeypatch, capsys):
+    result = {"n_reports": 2, "hit_rate_by_horizon": {}, "macro_hit_rate_by_horizon": {},
+              "invalidation": {"checked": 0, "triggered": 0, "complete": 0},
+              "not_checkable": 0, "paper_books": {}}
+    monkeypatch.setattr(P.TA, "run_tracker", lambda ticker=None: result)
+    monkeypatch.setattr(P, "REPORTS", tmp_path)
+    P.run_track(ticker, notify=False)
+    assert "Track record" in capsys.readouterr().out
+    (report,) = list(tmp_path.glob("TRACK-*.md"))
+    assert (ticker or "TRACK") in report.name
+
+
+def test_run_track_unknown_ticker_fails_cleanly(monkeypatch):
+    msgs = []
+    monkeypatch.setattr(P.TA, "run_tracker", lambda ticker=None: {"n_reports": 0})
+    monkeypatch.setattr(P, "_fail", lambda msg, notify: msgs.append(msg))
+    P.run_track("ZZZZ", notify=False)
+    assert msgs and "no saved reports for ZZZZ" in msgs[0]

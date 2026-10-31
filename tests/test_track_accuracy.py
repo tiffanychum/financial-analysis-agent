@@ -325,3 +325,48 @@ def test_paper_book_avoid_sells_everything_and_hold_does_nothing():
     out = TA.simulate_books([(d1, "buy", 5.0, 100.0), (d2, "hold", 0.0, 120.0), (d3, "sell", 0.0, 150.0)],
                             _closes(), 200.0)
     assert round(out["agent_return_pct"]) == 25  # half the cash 100->150 = +50% on 50%
+
+
+# --- plain-English formatting + ticker filter (the `track` command) -----------
+
+def _result(**over):
+    base = {"scored_new": 0, "skipped_unparseable": 0, "n_reports": 7,
+            "hit_rate_by_horizon": {"30d": {"n": 3, "hit_rate": 0.0, "hit_rate_95ci": (0.0, 0.56)}},
+            "macro_hit_rate_by_horizon": {},
+            "invalidation": {"checked": 5, "triggered": 1, "complete": 0}, "not_checkable": 14,
+            "paper_books": {"AAPL": {"first_report": "2026-09-06", "n_reports": 10, "n_buys": 0,
+                                     "agent_return_pct": 0.0, "dca_return_pct": 0.9}}}
+    return {**base, **over}
+
+
+def test_format_summary_is_plain_english_and_warns_on_small_samples():
+    out = TA.format_summary(_result())
+    assert "0 of 3 right" in out and "5 reports set a checkable level · 1 breached" in out
+    assert "agent +0.0% vs monthly buying +0.9%" in out
+    assert "Too early to judge" in out and "no BUY calls" in out
+
+
+def test_format_summary_has_no_small_sample_warning_when_n_is_large():
+    big = {"30d": {"n": 25, "hit_rate": 0.6, "hit_rate_95ci": (0.4, 0.78)}}
+    books = {"AAPL": {"first_report": "2026-01-01", "n_reports": 9, "n_buys": 2,
+                      "agent_return_pct": 4.0, "dca_return_pct": 1.0}}
+    out = TA.format_summary(_result(hit_rate_by_horizon=big, paper_books=books))
+    assert "Too early" not in out and "no BUY calls" not in out
+
+
+def test_format_summary_with_nothing_scorable_yet():
+    out = TA.format_summary(_result(hit_rate_by_horizon={}, paper_books={}))
+    assert "none old enough to score yet" in out and "No report is old enough" in out
+
+
+def test_format_report_has_table_and_disclaimer():
+    md = TA.format_report(_result(), "20261031-1955", "AAPL")
+    assert md.startswith("# Track record — AAPL")
+    assert "| 30d | 3 | 0% | 0%-56% | n/a |" in md
+    assert "Research only, not financial advice" in md
+
+
+def test_run_tracker_ticker_filter_only_narrows_the_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr(TA, "DB_PATH", tmp_path / "t.sqlite")
+    result = TA.run_tracker(reports_dir=tmp_path, ticker="AAPL")
+    assert result["n_reports"] == 0 and result["invalidation"]["checked"] == 0

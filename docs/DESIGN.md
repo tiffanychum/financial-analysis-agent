@@ -455,7 +455,7 @@ HOLD 0%. SpaceX cannot run (no listed price).
 | Tool | Role | Ground |
 |---|---|---|
 | `backtest.py` | Walk-forward on old statement columns; can recalibrate weights / fade | Exists; not auto-run on `analyze` |
-| `track_accuracy.py` | Score old reports after 30 / 90 / 180 / 365 days, incl. `MACRO-*.md` tilts (scored vs QQQ / GC=F, kept out of the ticker hit rate). Also checks whether each report's stated invalidation level was breached by a daily close inside its holding period (older reports: "not checkable"), and rebuilds a **paper book vs DCA** per ticker | Empty until reports age in |
+| `track_accuracy.py` | `track [TICKER]` command (`pipeline.py TRACK`): plain-English summary + `TRACK-<ts>.md`. Score old reports after 30 / 90 / 180 / 365 days, incl. `MACRO-*.md` tilts (scored vs QQQ / GC=F, kept out of the ticker hit rate). Also checks whether each report's stated invalidation level was breached by a daily close inside its holding period (older reports: "not checkable"), and rebuilds a **paper book vs DCA** per ticker | Empty until reports age in |
 
 **Paper book vs DCA:** both books start with the same cash at the ticker's first report. The agent book follows the reports (BUY at size s% invests s/10 of the starting cash, 10% being fully invested; AVOID sells everything; HOLD does nothing). The DCA book buys 1/12 of the cash monthly for 12 months from the first report regardless. Both are valued at today's price, idle cash earns nothing, and the books are recomputed from saved reports + prices on every run (no stored state to drift). Needs reports that print `Price at report` (the earliest reports lack it).
 
@@ -465,7 +465,7 @@ HOLD 0%. SpaceX cannot run (no listed price).
 
 | File | Role |
 |---|---|
-| `finance-agent.sh` | Detach + immediate reply (`<TICKER> [MONTHS]`, `macro`, or `macro-backtest <TICKER> [MONTHS]`) |
+| `finance-agent.sh` | Detach + immediate reply (`<TICKER> [MONTHS]`, `macro`, `track [TICKER]`, or `macro-backtest <TICKER> [MONTHS]`) |
 | `pipeline.py` | Orchestrate pack → LLMs → report / WhatsApp; `run_ticker` / `run_macro` / `run_macro_backtest` |
 | `data.py` | Fetch + fallbacks |
 | `valuation.py` | Formulas, regime, quality |

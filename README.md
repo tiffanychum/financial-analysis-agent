@@ -36,7 +36,7 @@ flowchart TD
 | 6 | **Two judges + ablation judge** | Two identical judges issue the call in parallel. A third decides without the dollar fair value. | **Measures how much to trust the answer.** If the two judges disagree, or the answer changes when the model's price estimate is hidden, the call is treated as shakier and confidence is lowered. A stable call carries more weight. |
 | 7 | **Guardrails** | Hard rules: conviction caps on judge disagreement, ablation flips or failed citations; no new sizing right before FOMC; long-only sizing | **Protects against overconfidence.** Some limits shouldn't be left to AI judgment, such as not sizing a new buy right before a major Fed meeting. Every rule that fires is listed, so you can see exactly why confidence was lowered. |
 | 8 | **Report + WhatsApp** | A markdown report with every number and argument, a "what changed since last run" section, and an optional short summary | **Lets you check the reasoning yourself.** The report shows every number and argument, plus what changed since the last run, so you can see what moved the call instead of trusting a bare verdict. |
-| 9 | **Track record** | `track_accuracy.py` checks past calls against real prices and invalidation levels, and compares a paper book with dollar-cost averaging | **Tests whether any of this works.** Over time it compares past calls with what prices actually did, and against simply investing a little every month. It is the honest test of whether the committee beats the boring approach. |
+| 9 | **Track record** | Send `track` (or run `track_accuracy.py`) to check past calls against real prices and invalidation levels, and compare a paper book with dollar-cost averaging | **Tests whether any of this works.** Over time it compares past calls with what prices actually did, and against simply investing a little every month. It is the honest test of whether the committee beats the boring approach. |
 
 Funds and gold have no company statements, so rows 2b and 2c are n/a for them. The macro scorecard, technicals and base rates carry the analysis instead.
 
@@ -97,6 +97,7 @@ Then message your agent on any connected channel:
 | `analyze AAPL` | 12-month committee analysis (about 8 to 15 min) |
 | `analyze QQQ 6` | Same, with a 6-month holding period (1 to 60) |
 | `macro` | Standalone macro regime scan with a tech-ETF and gold tilt (about 1 to 2 min) |
+| `track` or `track AAPL` | Scores past analyses against real prices: hit rate, "I was wrong" breaches, paper book vs monthly buying (about 15 s, no model calls) |
 | `macro-backtest QQQ 12` | Replays the macro rules since 2006 against that ticker (about 20 s, no model calls) |
 
 The launcher replies instantly and runs detached, because OpenClaw agent turns must not wait on a long job. Reports land in `reports/`.
@@ -137,11 +138,14 @@ Ablation (no dollar fair value): SELL conviction 62 - same call
 - **Valuation models, anchors, base rates, quality overlay:** the numbers the committee saw.
 - **Trader and Risk seats:** the trader's bull and bear cases, its plan, and the risk discussion.
 
-To score past calls and compare a paper book against dollar-cost averaging:
+To score past calls and compare a paper book against monthly buying, send `track` to your agent, or run:
 
 ```bash
-.venv/bin/python track_accuracy.py
+.venv/bin/python pipeline.py TRACK --no-whatsapp        # all tickers
+.venv/bin/python pipeline.py TRACK AAPL --no-whatsapp   # one ticker
 ```
+
+It writes `reports/TRACK-<timestamp>.md` and, if WhatsApp is configured, sends a short summary. With few or young reports it says "too early to judge" instead of showing a misleading hit rate.
 
 ## Project layout
 
@@ -153,7 +157,7 @@ valuation.py           valuation models and quality scores
 macro*.py              macro scorecard, tilt rules, historical backtest
 guardrails.py          conviction caps and hard rules
 anchors.py base_rates.py changes.py portfolio.py   model-free context
-track_accuracy.py      scores past calls, paper book vs DCA
+track_accuracy.py      scores past calls, paper book vs monthly buying
 scripts/finance-agent.sh   detached launcher the OpenClaw agent calls
 openclaw/              paste-in snippet for your agent's AGENTS.md
 tests/                 337 unit tests (no network or API calls)

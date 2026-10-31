@@ -33,6 +33,7 @@ import changes as CH
 import macro_rules as MR
 import macro_storage as MS
 import portfolio as PF
+import track_accuracy as TA
 import valuation as V
 
 BASE = Path(__file__).resolve().parent
@@ -788,8 +789,30 @@ def run_macro_backtest(ticker: str, horizon_months: int, notify: bool) -> None:
         _fail(f"❌ {ticker} macro backtest crashed: {e.__class__.__name__}: {str(e)[:140]}", notify)
 
 
+def run_track(ticker: str | None, notify: bool) -> None:
+    """Score saved reports against real prices (no model calls, ~10s)."""
+    try:
+        result = TA.run_tracker(ticker=ticker)
+        if ticker and not result["n_reports"]:
+            raise A.PipelineError(f"no saved reports for {ticker}")
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+        REPORTS.mkdir(exist_ok=True)
+        path = REPORTS / f"TRACK-{ticker + '-' if ticker else ''}{ts}.md"
+        path.write_text(TA.format_report(result, ts, ticker))
+        summary = "\n".join([TA.format_summary(result, ticker),
+                             f"📄 Full report: {path}", "⚠️ Research only, not financial advice."])
+        print(summary)
+        if notify:
+            send_whatsapp(summary)
+    except A.PipelineError as e:
+        _fail(f"❌ track record failed: {e}", notify)
+    except Exception as e:  # noqa: BLE001
+        _fail(f"❌ track record crashed: {e.__class__.__name__}: {str(e)[:140]}", notify)
+
+
 USAGE = ("usage: pipeline.py TICKER [--horizon-months N] [--no-whatsapp]\n"
          "       pipeline.py MACRO [--no-whatsapp]\n"
+         "       pipeline.py TRACK [TICKER] [--no-whatsapp]\n"
          "       pipeline.py MACRO-BACKTEST TICKER [--horizon-months N] [--no-whatsapp]")
 MAX_HORIZON_MONTHS = 60  # base_rates/backtest history is ~15-20y; longer windows leave too few points
 
@@ -824,6 +847,10 @@ def main():
     cmd = positional[0] if positional else None
     if cmd == "MACRO":
         run_macro(notify)
+    elif cmd == "TRACK":
+        if len(positional) > 1 and not _valid_ticker(positional[1]):
+            _usage_exit()
+        run_track(positional[1] if len(positional) > 1 else None, notify)
     elif cmd == "MACRO-BACKTEST":
         if len(positional) < 2 or not _valid_ticker(positional[1]):
             _usage_exit()

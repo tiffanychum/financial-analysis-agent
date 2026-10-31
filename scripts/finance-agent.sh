@@ -3,6 +3,7 @@
 #
 # Usage: finance-agent.sh <TICKER> [HORIZON_MONTHS]
 #        finance-agent.sh macro
+#        finance-agent.sh track [TICKER]
 #        finance-agent.sh macro-backtest <TICKER> [HORIZON_MONTHS]
 #
 # HORIZON_MONTHS is the holding period (1-60), default 12.
@@ -16,7 +17,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # repo root, wherever it was cloned
 PY="$DIR/.venv/bin/python"; [[ -x "$PY" ]] || PY="$(command -v python3)"  # venv preferred, system python3 fallback
-USAGE="usage: finance-agent.sh <TICKER> [HORIZON_MONTHS] | macro | macro-backtest <TICKER> [HORIZON_MONTHS]"
+USAGE="usage: finance-agent.sh <TICKER> [HORIZON_MONTHS] | macro | track [TICKER] | macro-backtest <TICKER> [HORIZON_MONTHS]"
 ARG="${1:-}"
 [[ -n "$ARG" ]] || { echo "$USAGE" >&2; exit 2; }
 
@@ -44,6 +45,21 @@ if [[ "$ARG_UP" == "MACRO" ]]; then
     LOG="$DIR/reports/.last-run-MACRO.log"
     nohup "$PY" "$DIR/pipeline.py" "MACRO" >"$LOG" 2>&1 &
     echo "🌐 Macro regime scan started (5 model calls, ~1-2 min). I'll message you the tech ETF / gold tilt when it's done; full report lands in reports/."
+    exit 0
+fi
+
+# "track" scores every saved report against real prices (no model calls, ~10s):
+# hit rate by horizon, "I was wrong" breaches, paper book vs monthly buying.
+if [[ "$ARG_UP" == "TRACK" ]]; then
+    TICKER="${2:-}"
+    TICKER_ARG=()
+    if [[ -n "$TICKER" ]]; then
+        check_ticker "$TICKER"
+        TICKER_ARG=("$(echo "$TICKER" | tr '[:lower:]' '[:upper:]')")
+    fi
+    LOG="$DIR/reports/.last-run-TRACK.log"
+    nohup "$PY" "$DIR/pipeline.py" "TRACK" ${TICKER_ARG[@]+"${TICKER_ARG[@]}"} >"$LOG" 2>&1 &
+    echo "📈 Track record scan started (no model calls, ~15s). I'll message you how past calls did vs real prices; full report lands in reports/."
     exit 0
 fi
 
