@@ -17,6 +17,13 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # repo root, wherever it was cloned
 PY="$DIR/.venv/bin/python"; [[ -x "$PY" ]] || PY="$(command -v python3)"  # venv preferred, system python3 fallback
+# Apple Silicon: an x86_64 parent (e.g. an Intel Node gateway under Rosetta) makes the
+# universal Python start as x86_64, which cannot load the arm64 numpy/pandas wheels
+# ("you should not try to import numpy from its source directory"). Force arm64.
+ARCH_PREFIX=()
+if [[ "$(uname -s)" == Darwin && "$(sysctl -n hw.optional.arm64 2>/dev/null)" == 1 ]]; then
+    ARCH_PREFIX=(arch -arm64)
+fi
 USAGE="usage: finance-agent.sh <TICKER> [HORIZON_MONTHS] | macro | track [TICKER] | macro-backtest <TICKER> [HORIZON_MONTHS]"
 ARG="${1:-}"
 [[ -n "$ARG" ]] || { echo "$USAGE" >&2; exit 2; }
@@ -43,7 +50,7 @@ check_ticker() {
 # committee run - fewer model calls, different framing in the ack message.
 if [[ "$ARG_UP" == "MACRO" ]]; then
     LOG="$DIR/reports/.last-run-MACRO.log"
-    nohup "$PY" "$DIR/pipeline.py" "MACRO" >"$LOG" 2>&1 &
+    nohup ${ARCH_PREFIX[@]+"${ARCH_PREFIX[@]}"} "$PY" "$DIR/pipeline.py" "MACRO" >"$LOG" 2>&1 &
     echo "🌐 Macro regime scan started (5 model calls, ~1-2 min). I'll message you the tech ETF / gold tilt when it's done; full report lands in reports/."
     exit 0
 fi
@@ -58,7 +65,7 @@ if [[ "$ARG_UP" == "TRACK" ]]; then
         TICKER_ARG=("$(echo "$TICKER" | tr '[:lower:]' '[:upper:]')")
     fi
     LOG="$DIR/reports/.last-run-TRACK.log"
-    nohup "$PY" "$DIR/pipeline.py" "TRACK" ${TICKER_ARG[@]+"${TICKER_ARG[@]}"} >"$LOG" 2>&1 &
+    nohup ${ARCH_PREFIX[@]+"${ARCH_PREFIX[@]}"} "$PY" "$DIR/pipeline.py" "TRACK" ${TICKER_ARG[@]+"${TICKER_ARG[@]}"} >"$LOG" 2>&1 &
     echo "📈 Track record scan started (no model calls, ~15s). I'll message you how past calls did vs real prices; full report lands in reports/."
     exit 0
 fi
@@ -72,7 +79,7 @@ if [[ "$ARG_UP" == "MACRO-BACKTEST" ]]; then
     horizon_args "${3:-}"
     TICKER_UP=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]')
     LOG="$DIR/reports/.last-run-MACRO-BACKTEST-${TICKER_UP}.log"
-    nohup "$PY" "$DIR/pipeline.py" "MACRO-BACKTEST" "$TICKER" ${HORIZON_ARGS[@]+"${HORIZON_ARGS[@]}"} >"$LOG" 2>&1 &
+    nohup ${ARCH_PREFIX[@]+"${ARCH_PREFIX[@]}"} "$PY" "$DIR/pipeline.py" "MACRO-BACKTEST" "$TICKER" ${HORIZON_ARGS[@]+"${HORIZON_ARGS[@]}"} >"$LOG" 2>&1 &
     echo "📈 Macro backtest of ${TICKER_UP} started (no model calls, ~1 min). I'll message you how each macro regime played out historically; full report lands in reports/."
     exit 0
 fi
@@ -82,5 +89,5 @@ horizon_args "${2:-}"
 HORIZON_NOTE="${2:-12}-month holding period"
 
 LOG="$DIR/reports/.last-run-${ARG_UP}.log"
-nohup "$PY" "$DIR/pipeline.py" "$ARG" ${HORIZON_ARGS[@]+"${HORIZON_ARGS[@]}"} >"$LOG" 2>&1 &
+nohup ${ARCH_PREFIX[@]+"${ARCH_PREFIX[@]}"} "$PY" "$DIR/pipeline.py" "$ARG" ${HORIZON_ARGS[@]+"${HORIZON_ARGS[@]}"} >"$LOG" 2>&1 &
 echo "🔬 Analysis of ${ARG_UP} (${HORIZON_NOTE}) started (~14 model calls, ~6-12 min). I'll message you the summary when it's done; full report lands in reports/."

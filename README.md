@@ -176,7 +176,7 @@ docs/DESIGN.md         full design note
 |---|---|
 | WhatsApp message gets no reply | Check the gateway is up: `openclaw gateway status`. If WhatsApp reports "logged out", re-link with `openclaw channels login --channel whatsapp` and restart the gateway. |
 | Reply says it's "already running" | A run for that ticker is in progress. Wait for it, or check `reports/.last-run-<TICKER>.log`. |
-| Run died immediately | Read `reports/.last-run-<TICKER>.log` for the traceback. |
+| Run died immediately | Read `reports/.last-run-<TICKER>.log` for the traceback. On an Apple Silicon Mac with an Intel (x86_64) Node/gateway, a numpy error such as "you should not try to import numpy from its source directory" actually means an architecture mismatch; the launcher forces `arch -arm64` to avoid it. |
 | `CURSOR_API_KEY not set` / `LLM_MODEL` error | Check `.env` is in the repo root and the variables for your chosen provider are filled in. |
 | Many fields show n/a | Expected for ETFs and gold, which have no company statements. |
 
