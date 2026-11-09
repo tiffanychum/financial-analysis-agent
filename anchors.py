@@ -153,6 +153,10 @@ def growth_percentile(ticker: str, f: dict, rf: float, erp: float, current_growt
     net_debt = (f.get("total_debt") or 0.0) - (f.get("cash") or 0.0)
     r = V.wacc(f, rf, erp)
     price, shares = _price_series(ticker), _shares_series(facts)
+    if price.empty or shares.empty:
+        # Multi-class issuers (e.g. Alphabet) have no single cover-page share
+        # count in SEC companyfacts; _multiple_series guards the same way.
+        return {"applicable": False, "reason": "no SEC share-count history (e.g. multi-class shares)"}
     dates, hist = [], []
     for end_date, fcf_t in fcf_history:
         if fcf_t is None or fcf_t <= 0:

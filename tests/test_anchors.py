@@ -165,3 +165,13 @@ def test_etf_price_percentile_not_applicable_with_short_history(monkeypatch):
 def _series_n(n: int) -> pd.Series:
     idx = pd.date_range("2020-01-01", periods=n, freq="D")
     return pd.Series(range(1, n + 1), index=idx, dtype=float)
+
+
+def test_growth_percentile_not_applicable_without_share_history(monkeypatch):
+    # Multi-class issuers (Alphabet) have no cover-page share count: must not crash.
+    monkeypatch.setattr(D, "fetch_sec_companyfacts", lambda ticker: {"facts": {}})
+    monkeypatch.setattr(A, "_fcf_ttm_history", lambda facts: [(d, 1.0) for d in _DATES])
+    monkeypatch.setattr(A, "_price_series", lambda ticker, years_back=10: _series(list(range(1, 9))))
+    monkeypatch.setattr(A, "_shares_series", lambda facts: pd.Series(dtype=float))
+    out = A.growth_percentile("GOOG", {"total_debt": 0.0, "cash": 0.0}, 0.04, 0.05, 0.1)
+    assert out["applicable"] is False and "share-count" in out["reason"]
