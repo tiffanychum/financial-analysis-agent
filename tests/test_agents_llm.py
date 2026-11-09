@@ -562,3 +562,42 @@ def test_openai_provider_skips_web_search(monkeypatch):
     monkeypatch.setattr(A.Agent, "prompt", staticmethod(
         lambda prompt, options: pytest.fail("web search must not call the Cursor SDK")))
     assert A._web_search_agent(client, "find consensus") == ""
+
+
+# --- optional debate (--debate, off by default) --------------------------------
+
+@pytest.mark.parametrize("signals,expected_calls", [
+    (["bullish", "bearish"], 5),   # bull, bear, bull2, bear2, research judge
+    (["bullish", "bullish"], 2),   # devil's advocate, research judge
+])
+def test_run_debate_caps_every_debate_turn_but_not_the_judge(monkeypatch, signals, expected_calls):
+    systems: list[str] = []
+
+    def fake_ask(client, system, user):
+        systems.append(system)
+        return '{"signal": "hold", "confidence": 50, "reasoning": "x"}'
+
+    monkeypatch.setattr(A, "ask", fake_ask)
+    analysts = {f"s{i}": {"signal": s} for i, s in enumerate(signals)}
+    A.run_debate(_client(), "{}", analysts, _budget())
+    assert len(systems) == expected_calls
+    assert all(A.TURN_RULE in s for s in systems[:-1])
+    assert A.TURN_RULE not in systems[-1]
+
+
+def test_debate_feeds_only_the_trader_and_is_optional(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    def fake_ask(client, system, user):
+        calls.append((system, user))
+        return '{"signal": "hold"}'
+
+    monkeypatch.setattr(A, "ask", fake_ask)
+    A.run_decision(_client(), "{}", {}, _budget())
+    assert "DEBATE-MARKER" not in calls[0][1] and len(calls) == 6  # trader, 3 risk, 2 judges (no redacted pack, so no ablation)
+    calls.clear()
+    debate = {"mode": "bull-bear", "transcript": ["BULL: DEBATE-MARKER"], "judge_text": "VERDICT-MARKER"}
+    A.run_decision(_client(), "{}", {}, _budget(), debate=debate)
+    trader_user = calls[0][1]
+    assert "DEBATE-MARKER" in trader_user and "VERDICT-MARKER" in trader_user
+    assert all("DEBATE-MARKER" not in u for _, u in calls[1:])

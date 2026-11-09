@@ -259,7 +259,7 @@ def test_valid_ticker_allows_yahoo_symbol_characters(ticker, ok):
 def test_main_dispatches_with_horizon(monkeypatch, argv, expected):
     calls = []
     monkeypatch.setattr(sys, "argv", argv)
-    monkeypatch.setattr(P, "run_ticker", lambda t, notify, h: calls.append(("ticker", t, h)))
+    monkeypatch.setattr(P, "run_ticker", lambda t, notify, h, use_debate=False: calls.append(("ticker", t, h)))
     monkeypatch.setattr(P, "run_macro_backtest", lambda t, h, notify: calls.append(("backtest", t, h)))
     P.main()
     assert calls == [expected]
@@ -314,3 +314,15 @@ def test_run_track_unknown_ticker_fails_cleanly(monkeypatch):
     monkeypatch.setattr(P, "_fail", lambda msg, notify: msgs.append(msg))
     P.run_track("ZZZZ", notify=False)
     assert msgs and "no saved reports for ZZZZ" in msgs[0]
+
+
+@pytest.mark.parametrize("argv,expected", [
+    (["pipeline.py", "AAPL"], False),
+    (["pipeline.py", "AAPL", "--debate"], True),
+])
+def test_debate_flag_is_off_by_default(monkeypatch, argv, expected):
+    seen = []
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(P, "run_ticker", lambda t, notify, h, use_debate=False: seen.append(use_debate))
+    P.main()
+    assert seen == [expected]

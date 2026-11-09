@@ -7,8 +7,9 @@ and variant naming evolve; see cursor_sdk skill docs).
 
 Design contract (agreed):
 - every agent returns {signal, confidence 0-100, reasoning}
-- no separate debate: the trader argues the case against the analyst majority
-  first, then the other side (unanimous panels get a skeptic instruction)
+- no debate by default: the trader argues the case against the analyst majority
+  first, then the other side (unanimous panels get a skeptic instruction);
+  run_debate (bull/bear or devil's advocate + research judge) is opt-in via --debate
 - every trader/risk claim must cite a number from the data pack or a vote
 - LLM never does arithmetic; all numbers come precomputed in the pack
 - hard per-call timeout + total budget; any failure raises PipelineError with a
@@ -530,6 +531,54 @@ def _capped(text: str) -> str:
     return text[:TURN_CHAR_CAP].rstrip() + " … [truncated: over the turn limit]"
 
 
+# Optional (`--debate`): bull/bear rounds (or a devil's advocate when the panel is
+# unanimous) plus a research judge, run BEFORE the trader. Off by default: across
+# five like-for-like runs it never changed the call and added ~5 sequential calls.
+def run_debate(client: LLMClient, pack_json: str, analysts: dict, budget: Budget) -> dict:
+    budget.check("debate")
+    signals = {v["signal"] for v in analysts.values()}
+    votes = json.dumps({k: v for k, v in analysts.items()}, indent=1)
+    cite_rule = ("Every claim MUST cite a specific number from the data pack or "
+                 "the analyst votes; uncited claims will be discounted. " + TURN_RULE)
+    transcript: list[str] = []
+
+    if len(signals) == 1:
+        mode = "devils-advocate"
+        only = signals.pop()
+        opp = "bearish" if only == "bullish" else "bullish"
+        da = _capped(ask(client,
+                 f"You are a devil's advocate. All analysts are {only}. Build the "
+                 f"strongest {opp} case to stress-test the consensus. " + cite_rule,
+                 f"Data pack:\n{pack_json}\n\nAnalyst votes:\n{votes}"))
+        transcript.append(f"DEVIL'S ADVOCATE ({opp}):\n{da}")
+    else:
+        mode = "bull-bear"
+        bull = _capped(ask(client, "You are the Bull researcher. Argue the bullish case. " + cite_rule,
+                   f"Data pack:\n{pack_json}\n\nAnalyst votes:\n{votes}"))
+        transcript.append("BULL R1:\n" + bull)
+        bear = _capped(ask(client, "You are the Bear researcher. Rebut the bull's strongest "
+                   "cited points, then argue the bearish case. " + cite_rule,
+                   f"Data pack:\n{pack_json}\n\nBull argued:\n{bull}"))
+        transcript.append("BEAR R1:\n" + bear)
+        bull2 = _capped(ask(client, "You are the Bull researcher. Directly rebut the bear's "
+                    "strongest cited points. " + cite_rule,
+                    f"Data pack:\n{pack_json}\n\nBear argued:\n{bear}"))
+        transcript.append("BULL R2:\n" + bull2)
+        bear2 = _capped(ask(client, "You are the Bear researcher. Closing rebuttal. " + cite_rule,
+                    f"Data pack:\n{pack_json}\n\nBull rebutted:\n{bull2}"))
+        transcript.append("BEAR R2:\n" + bear2)
+
+    budget.check("debate-judge")
+    judge = ask(client,
+                "You are the research judge. Weigh the debate; discount any claim "
+                "that does not cite a data-pack number. State which side carried "
+                "the argument and why. " + SCHEMA,
+                f"Data pack:\n{pack_json}\n\nAnalyst votes:\n{votes}\n\nDebate:\n"
+                + "\n\n".join(transcript))
+    return {"mode": mode, "transcript": transcript, "judge_text": judge,
+            "judge": parse_signal(judge)}
+
+
 # This is a long-only retail product: it never proposes shorting. "sell"
 # means "do not hold this / exit if you already do", displayed as AVOID -
 # not a short thesis with its own sizing. size_pct only ever answers "how
@@ -636,11 +685,15 @@ def trader_system(analysts: dict, horizon_months: int) -> str:
 
 def run_decision(client: LLMClient, pack_json: str, analysts: dict,
                  budget: Budget, horizon_months: int = DEFAULT_HORIZON_MONTHS,
-                 pack_json_redacted: str | None = None) -> dict:
+                 pack_json_redacted: str | None = None, debate: dict | None = None) -> dict:
     budget.check("trader")
     votes = f"Analyst votes:\n{json.dumps(analysts, indent=1)}"
+    # With --debate the transcript and research verdict are extra evidence for the
+    # trader only; the risk seats and judges still read the trader's synthesis.
+    debate_ctx = (f"\n\nDebate ({debate['mode']}):\n" + "\n\n".join(debate["transcript"])
+                  + f"\n\nResearch judge verdict:\n{debate['judge_text']}") if debate else ""
     trader = ask(client, trader_system(analysts, horizon_months),
-                 f"Data pack:\n{pack_json}\n\n{votes}")
+                 f"Data pack:\n{pack_json}\n\n{votes}{debate_ctx}")
 
     stances = {
         "aggressive": "You are the AGGRESSIVE risk manager: argue for more exposure if the edge is real.",

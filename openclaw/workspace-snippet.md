@@ -11,6 +11,7 @@ e.g. AAPL, QQQ, BRK-B, GC=F; MONTHS = optional holding period 1-60, default 12),
 ```
 
 Pass MONTHS only if the user gave one (e.g. `analyze QQQ 6` -> `QQQ 6`).
+Append `debate` only if the user said it (e.g. `analyze AAPL debate` -> `AAPL debate`); it adds an optional bull/bear debate and is off otherwise.
 
 The script detaches the research pipeline and returns one line IMMEDIATELY - reply with that
 line verbatim and END the turn. Do NOT wait for the analysis (~8-15 min); the pipeline saves the

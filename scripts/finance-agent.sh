@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Detached launcher for the finance research pipeline.
 #
-# Usage: finance-agent.sh <TICKER> [HORIZON_MONTHS]
+# Usage: finance-agent.sh <TICKER> [HORIZON_MONTHS] [debate]
 #        finance-agent.sh macro
 #        finance-agent.sh track [TICKER]
 #        finance-agent.sh macro-backtest <TICKER> [HORIZON_MONTHS]
@@ -25,6 +25,13 @@ if [[ "$(uname -s)" == Darwin && "$(sysctl -n hw.optional.arm64 2>/dev/null)" ==
     ARCH_PREFIX=(arch -arm64)
 fi
 USAGE="usage: finance-agent.sh <TICKER> [HORIZON_MONTHS] | macro | track [TICKER] | macro-backtest <TICKER> [HORIZON_MONTHS]"
+# Optional `debate` / `--debate` anywhere in the args turns the bull/bear debate on
+# (off by default: ~5 more sequential model calls, same calls in our 5-ticker test).
+DEBATE_ARGS=(); ARGS=()
+for a in "$@"; do
+    if [[ "$(echo "$a" | tr '[:upper:]' '[:lower:]')" =~ ^(--)?debate$ ]]; then DEBATE_ARGS=(--debate); else ARGS+=("$a"); fi
+done
+set -- ${ARGS[@]+"${ARGS[@]}"}
 ARG="${1:-}"
 [[ -n "$ARG" ]] || { echo "$USAGE" >&2; exit 2; }
 
@@ -87,7 +94,9 @@ fi
 check_ticker "$ARG"
 horizon_args "${2:-}"
 HORIZON_NOTE="${2:-12}-month holding period"
+CALLS="~14 model calls, ~6-12 min"
+if [[ ${#DEBATE_ARGS[@]} -gt 0 ]]; then HORIZON_NOTE="$HORIZON_NOTE, with debate"; CALLS="~19 model calls, ~10-15 min"; fi
 
 LOG="$DIR/reports/.last-run-${ARG_UP}.log"
-nohup ${ARCH_PREFIX[@]+"${ARCH_PREFIX[@]}"} "$PY" "$DIR/pipeline.py" "$ARG" ${HORIZON_ARGS[@]+"${HORIZON_ARGS[@]}"} >"$LOG" 2>&1 &
-echo "🔬 Analysis of ${ARG_UP} (${HORIZON_NOTE}) started (~14 model calls, ~6-12 min). I'll message you the summary when it's done; full report lands in reports/."
+nohup ${ARCH_PREFIX[@]+"${ARCH_PREFIX[@]}"} "$PY" "$DIR/pipeline.py" "$ARG" ${HORIZON_ARGS[@]+"${HORIZON_ARGS[@]}"} ${DEBATE_ARGS[@]+"${DEBATE_ARGS[@]}"} >"$LOG" 2>&1 &
+echo "🔬 Analysis of ${ARG_UP} (${HORIZON_NOTE}) started (${CALLS}). I'll message you the summary when it's done; full report lands in reports/."

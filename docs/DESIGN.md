@@ -398,7 +398,7 @@ AAPL/TSLA). Read the trader's bull/bear sections, not only the emoji.
 | Burry | Accruals, Beneish, Z, implied vs history | Lens, not a new model |
 | Macro | Regime scorecard + tilt (Layer 0); primary for ETFs, secondary context for single stocks | Bound to `macro_rules.py` output, not re-derived |
 
-**No separate debate.** Across 18 saved reports the Bull/Bear rounds never
+**No separate debate by default** (opt in with `--debate`, or `analyze AAPL debate`; the transcript and research-judge verdict then go to the trader only). Across 18 saved reports the Bull/Bear rounds never
 flipped the analyst majority's direction, and they were five sequential
 calls - the slowest, most timeout-prone stage. The trader now writes the
 case **against** the analyst majority first (a tie counts as bearish), then

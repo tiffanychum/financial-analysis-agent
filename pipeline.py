@@ -347,7 +347,7 @@ def _committee_check_lines(d: dict) -> list[str]:
 
 
 def write_report(pack, analysts, decision, ts: str, pack_path: Path | None,
-                 model_id: str, changes: dict | None = None) -> Path:
+                 model_id: str, changes: dict | None = None, debate: dict | None = None) -> Path:
     REPORTS.mkdir(exist_ok=True)
     tk = pack["ticker"]
     path = REPORTS / f"{tk}-{ts}.md"
@@ -495,6 +495,10 @@ def write_report(pack, analysts, decision, ts: str, pack_path: Path | None,
                 cit_bit += f", unverified: {cit['unverified']}"
             cit_bit += "]"
         lines.append(f"- **{name}**: {a['signal']} ({a['confidence']}) — {a['reasoning']}{cit_bit}")
+    if debate:
+        lines += ["", f"## Debate ({debate['mode']})", ""]
+        lines += [t + "\n" for t in debate["transcript"]]
+        lines += [f"**Research judge:** {debate['judge_text']}"]
     lines += ["", "## Trader: bull vs bear and plan", "", decision["trader_text"], "",
               "## Risk seats", ""]
     lines += [t + "\n" for t in decision["risk_transcript"]]
@@ -503,7 +507,7 @@ def write_report(pack, analysts, decision, ts: str, pack_path: Path | None,
     return path
 
 
-def short_summary(pack, analysts, decision, report_path) -> str:
+def short_summary(pack, analysts, decision, report_path, debate: dict | None = None) -> str:
     v, d = pack["valuation"], decision["decision"]
     f = pack["fundamentals"]
     emoji = {"buy": "🟢", "sell": "🔴", "hold": "🟡"}[d["signal"]]
@@ -532,6 +536,8 @@ def short_summary(pack, analysts, decision, report_path) -> str:
     if qbits:
         out.append("Quality: " + " ".join(qbits))
     out.append(f"Votes: {votes}")
+    if debate:
+        out.append(f"Debate({debate['mode']}): {debate['judge']['signal']}")
     out.append(f"Why: {d['rationale'][:160]}")
     out.append(f"Invalidation: {d['invalidation'][:120]}")
     if d.get("guardrail_notes"):
@@ -646,7 +652,8 @@ def _changes_since_last(pack: dict, current_stem: str) -> dict | None:
             "lines": lines or ["no key field moved"]}
 
 
-def run_ticker(ticker: str, notify: bool, horizon_months: int = A.DEFAULT_HORIZON_MONTHS) -> None:
+def run_ticker(ticker: str, notify: bool, horizon_months: int = A.DEFAULT_HORIZON_MONTHS,
+               use_debate: bool = False) -> None:
     budget = A.Budget()
     try:
         client = A.llm_client()
@@ -656,15 +663,16 @@ def run_ticker(ticker: str, notify: bool, horizon_months: int = A.DEFAULT_HORIZO
         pj = pack_for_llm(pack)
         pj_redacted = pack_for_llm(pack, redact_fair_value=True)
         analysts = A.run_analysts(client, pack, pj, pj_redacted, budget)
+        debate = A.run_debate(client, pj, analysts, budget) if use_debate else None
         decision = A.run_decision(client, pj, analysts, budget, horizon_months,
-                                  pack_json_redacted=pj_redacted)
+                                  pack_json_redacted=pj_redacted, debate=debate)
         decision["decision"] = G.apply_guardrails(pack, analysts, decision["decision"])
         ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
         pack_path = save_pack(pack, client, ts)
         report = write_report(pack, analysts, decision, ts=ts,
                               pack_path=pack_path, model_id=client.model.id,
-                              changes=_changes_since_last(pack, f"{ticker}-{ts}"))
-        summary = short_summary(pack, analysts, decision, report)
+                              changes=_changes_since_last(pack, f"{ticker}-{ts}"), debate=debate)
+        summary = short_summary(pack, analysts, decision, report, debate)
         print(summary)
         if notify:
             send_whatsapp(summary)
@@ -810,7 +818,7 @@ def run_track(ticker: str | None, notify: bool) -> None:
         _fail(f"❌ track record crashed: {e.__class__.__name__}: {str(e)[:140]}", notify)
 
 
-USAGE = ("usage: pipeline.py TICKER [--horizon-months N] [--no-whatsapp]\n"
+USAGE = ("usage: pipeline.py TICKER [--horizon-months N] [--debate] [--no-whatsapp]\n"
          "       pipeline.py MACRO [--no-whatsapp]\n"
          "       pipeline.py TRACK [TICKER] [--no-whatsapp]\n"
          "       pipeline.py MACRO-BACKTEST TICKER [--horizon-months N] [--no-whatsapp]")
@@ -856,7 +864,7 @@ def main():
             _usage_exit()
         run_macro_backtest(positional[1], horizon, notify)
     elif cmd and _valid_ticker(cmd):
-        run_ticker(cmd, notify, horizon)
+        run_ticker(cmd, notify, horizon, use_debate="--debate" in argv)
     else:
         _usage_exit()
 

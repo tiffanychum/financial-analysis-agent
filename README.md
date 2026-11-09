@@ -96,6 +96,7 @@ Then message your agent on any connected channel:
 |---|---|
 | `analyze AAPL` | 12-month committee analysis (about 8 to 15 min) |
 | `analyze QQQ 6` | Same, with a 6-month holding period (1 to 60) |
+| `analyze AAPL debate` | Same, plus an optional bull/bear debate before the trader (off by default; about 5 more calls, 10 to 15 min) |
 | `macro` | Standalone macro regime scan with a tech-ETF and gold tilt (about 1 to 2 min) |
 | `track` or `track AAPL` | Scores past analyses against real prices: hit rate, "I was wrong" breaches, paper book vs monthly buying (about 15 s, no model calls) |
 | `macro-backtest QQQ 12` | Replays the macro rules since 2006 against that ticker (about 20 s, no model calls) |
